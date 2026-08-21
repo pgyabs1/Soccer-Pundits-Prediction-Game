@@ -187,7 +187,7 @@ export default function Home() {
     .sort((a, b) => b.total - a.total);
 
   if (loading) {
-    return <div className="gate"><div className="eyebrow">LOADING THE BOOT ROOM\u2026</div></div>;
+    return <div className="gate"><div className="eyebrow">LOADING THE SOCCER PUNDITS PREDICTION GAME\u2026</div></div>;
   }
 
   if (!me) {
@@ -195,8 +195,8 @@ export default function Home() {
       <div className="gate">
         <div className="gate-inner">
           <div className="eyebrow">WEEK IN, WEEK OUT</div>
-          <div className="wordmark">THE BOOT<br />ROOM</div>
-          <div className="subtitle">Pick your scores. Own your table.</div>
+          <div className="wordmark">THE SOCCER PUNDITS PREDICTION GAME<br />ROOM</div>
+          <div className="subtitle">Are You Ready. We Go Again.</div>
 
           {players.length > 0 && (
             <>
@@ -230,7 +230,7 @@ export default function Home() {
       <div className="header">
         <div className="header-top">
           <div>
-            <div className="header-eyebrow">THE BOOT ROOM</div>
+            <div className="header-eyebrow">THE SOCCER PUNDITS PREDICTION GAME</div>
             <div className="header-name">Hi, {me}</div>
           </div>
           <button className="switch-link" onClick={() => { setMe(null); setAdminUnlocked(false); }}>Switch</button>
