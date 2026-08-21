@@ -28,6 +28,9 @@ export default function Home() {
 
   const [me, setMe] = useState(null);
   const [nameInput, setNameInput] = useState("");
+  const [pinInputJoin, setPinInputJoin] = useState("");
+  const [joinError, setJoinError] = useState("");
+  const [joining, setJoining] = useState(false);
   const [tab, setTab] = useState("predict");
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -41,13 +44,13 @@ export default function Home() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    const [{ data: p }, { data: gws }, { data: fx }, { data: preds }] = await Promise.all([
-      supabase.from("players").select("name").order("created_at"),
+    const [playersRes, { data: gws }, { data: fx }, { data: preds }] = await Promise.all([
+      fetch("/api/players").then((r) => r.json()),
       supabase.from("gameweeks").select("*").order("number", { ascending: false }),
       supabase.from("fixtures").select("*"),
       supabase.from("predictions").select("*"),
     ]);
-    setPlayers((p || []).map((x) => x.name));
+    setPlayers(playersRes.players || []);
     setPredictions(preds || []);
     const withFixtures = (gws || []).map((g) => ({
       ...g,
@@ -59,18 +62,24 @@ export default function Home() {
 
   useEffect(() => { loadAll(); }, [loadAll]);
 
-  const join = async (name) => {
-    const n = name.trim();
-    if (!n) return;
-    if (!players.includes(n)) {
-      const { error } = await supabase.from("players").insert({ name: n });
-      if (error && !error.message.includes("duplicate")) {
-        showToast("Couldn't join, try again");
-        return;
-      }
-      setPlayers((prev) => [...prev, n]);
-    }
-    setMe(n);
+  const join = async () => {
+    const n = nameInput.trim();
+    if (!n) { setJoinError("Enter your name"); return; }
+    if (!/^\d{4}$/.test(pinInputJoin)) { setJoinError("PIN must be 4 digits"); return; }
+
+    setJoining(true);
+    setJoinError("");
+    const res = await fetch("/api/join", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: n, pin: pinInputJoin }),
+    });
+    const data = await res.json();
+    setJoining(false);
+
+    if (!res.ok) { setJoinError(data.error || "Couldn't join"); return; }
+    if (data.created) setPlayers((prev) => [...prev, data.name]);
+    setMe(data.name);
   };
 
   const predFor = (fixtureId) => predictions.find((pr) => pr.fixture_id === fixtureId && pr.player_name === me);
@@ -166,6 +175,21 @@ export default function Home() {
     showToast(`Gameweek ${gw.number} scored \ud83c\udfc6`);
   };
 
+  const deleteGw = async (gw) => {
+    if (!confirm(`Delete Gameweek ${gw.number}? This removes its fixtures and everyone's predictions for it. Can't be undone.`)) return;
+    setSaving(true);
+    const res = await fetch("/api/admin/delete-gameweek", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pinInput, gameweekId: gw.id }),
+    });
+    const data = await res.json();
+    setSaving(false);
+    if (!res.ok) { showToast(data.error || "Failed to delete"); return; }
+    await loadAll();
+    showToast(`Gameweek ${gw.number} deleted`);
+  };
+
   const openGws = gameweeks.filter((g) => !g.finalized);
   const finalizedGws = gameweeks.filter((g) => g.finalized);
 
@@ -187,7 +211,7 @@ export default function Home() {
     .sort((a, b) => b.total - a.total);
 
   if (loading) {
-    return <div className="gate"><div className="eyebrow">LOADING THE SOCCER PUNDITS PREDICTION GAME\u2026</div></div>;
+    return <div className="gate"><div className="eyebrow">LOADING THE BOOT ROOM\u2026</div></div>;
   }
 
   if (!me) {
@@ -195,31 +219,47 @@ export default function Home() {
       <div className="gate">
         <div className="gate-inner">
           <div className="eyebrow">WEEK IN, WEEK OUT</div>
-          <div className="wordmark">THE PUNDITS'<br />ROOM</div>
-          <div className="subtitle">Are You Ready. We Go Again.</div>
+          <div className="wordmark">THE BOOT<br />ROOM</div>
+          <div className="subtitle">Pick your scores. Own your table.</div>
 
           {players.length > 0 && (
             <>
-              <div className="label">Who's this?</div>
+              <div className="label">Who's this? (tap your name, then enter your PIN below)</div>
               <div className="chips">
                 {players.map((p) => (
-                  <button key={p} className="chip" onClick={() => setMe(p)}>{p}</button>
+                  <button key={p} className="chip" onClick={() => { setNameInput(p); setJoinError(""); }}>{p}</button>
                 ))}
               </div>
             </>
           )}
 
-          <div className="label">New here?</div>
-          <div className="row">
+          <div className="label">{players.length > 0 ? "Name + your 4-digit PIN" : "Your name + pick a 4-digit PIN"}</div>
+          <div className="row" style={{ marginBottom: "0.5rem" }}>
             <input
               className="input"
               placeholder="Your name"
               value={nameInput}
               onChange={(e) => setNameInput(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && join(nameInput)}
             />
-            <button className="btn-amber" onClick={() => join(nameInput)}>Join</button>
           </div>
+          <div className="row">
+            <input
+              className="input"
+              placeholder="4-digit PIN"
+              inputMode="numeric"
+              maxLength={4}
+              value={pinInputJoin}
+              onChange={(e) => setPinInputJoin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              onKeyDown={(e) => e.key === "Enter" && join()}
+            />
+            <button className="btn-amber" disabled={joining} onClick={join}>Join</button>
+          </div>
+          {joinError && <div style={{ color: "#F2A93B", fontSize: "0.8rem", marginTop: "0.5rem" }}>{joinError}</div>}
+          {players.length === 0 && (
+            <div style={{ color: "#5C7A6A", fontSize: "0.75rem", marginTop: "0.75rem" }}>
+              Remember this PIN — you'll need it every time you come back.
+            </div>
+          )}
         </div>
       </div>
     );
@@ -230,7 +270,7 @@ export default function Home() {
       <div className="header">
         <div className="header-top">
           <div>
-            <div className="header-eyebrow">THE SOCCER PUNDITS PREDICTION GAME</div>
+            <div className="header-eyebrow">THE BOOT ROOM</div>
             <div className="header-name">Hi, {me}</div>
           </div>
           <button className="switch-link" onClick={() => { setMe(null); setAdminUnlocked(false); }}>Switch</button>
@@ -382,6 +422,23 @@ export default function Home() {
                     </div>
                   </div>
                 ))}
+              </>
+            )}
+
+            {gameweeks.length > 0 && (
+              <>
+                <div className="section-title" style={{ marginTop: "1.5rem" }}>Manage Gameweeks</div>
+                <div className="card">
+                  {gameweeks.map((gw) => (
+                    <div key={gw.id} className="result-row" style={{ alignItems: "center" }}>
+                      <span>GW{gw.number}{gw.finalized ? " \u2013 scored" : " \u2013 open"}</span>
+                      <span />
+                      <button className="remove-btn" style={{ fontSize: "0.75rem", fontWeight: 700 }} disabled={saving} onClick={() => deleteGw(gw)}>
+                        Delete
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </>
             )}
           </>
