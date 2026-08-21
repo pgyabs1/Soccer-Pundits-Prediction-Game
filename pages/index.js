@@ -195,7 +195,7 @@ export default function Home() {
       <div className="gate">
         <div className="gate-inner">
           <div className="eyebrow">WEEK IN, WEEK OUT</div>
-          <div className="wordmark">THE SOCCER PUNDITS PREDICTION GAME<br />ROOM</div>
+          <div className="wordmark">THE PUNDITS'<br />ROOM</div>
           <div className="subtitle">Are You Ready. We Go Again.</div>
 
           {players.length > 0 && (
