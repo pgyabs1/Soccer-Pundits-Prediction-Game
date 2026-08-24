@@ -19,7 +19,12 @@ export default async function handler(req, res) {
 
   const rows = fixtures
     .filter((f) => f.home?.trim() && f.away?.trim())
-    .map((f) => ({ gameweek_id: gw.id, home: f.home.trim(), away: f.away.trim() }));
+    .map((f) => ({
+      gameweek_id: gw.id,
+      home: f.home.trim(),
+      away: f.away.trim(),
+      lock_at: f.lockAt || null,
+    }));
 
   const { error: fxError } = await supabaseAdmin.from("fixtures").insert(rows);
   if (fxError) return res.status(400).json({ error: fxError.message });
