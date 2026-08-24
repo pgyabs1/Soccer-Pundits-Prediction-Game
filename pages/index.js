@@ -35,6 +35,7 @@ export default function Home() {
   const [toast, setToast] = useState(null);
   const [saving, setSaving] = useState(false);
   const [expanded, setExpanded] = useState(null);
+  const [expandedGwDetail, setExpandedGwDetail] = useState(null); // "playerName:gwNumber"
 
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [pinInput, setPinInput] = useState("");
@@ -88,9 +89,12 @@ export default function Home() {
   const updateDraft = (fixtureId, field, val) =>
     setDraft((d) => ({ ...d, [fixtureId]: { ...(d[fixtureId] || {}), [field]: val } }));
 
+  const isFxLocked = (fx) => fx.lock_at && new Date() >= new Date(fx.lock_at);
+
   const submitGw = async (gw) => {
     setSaving(true);
     const rows = gw.fixtures
+      .filter((fx) => !isFxLocked(fx))
       .map((fx) => {
         const local = draft[fx.id];
         const existing = predFor(fx.id);
@@ -110,12 +114,11 @@ export default function Home() {
   };
 
   // ---- ADMIN ----
-  const [newFixtures, setNewFixtures] = useState([{ home: "", away: "" }]);
+  const [newFixtures, setNewFixtures] = useState([{ home: "", away: "", lockAt: "" }]);
   const [newGwNumber, setNewGwNumber] = useState("");
-  const [newLockAt, setNewLockAt] = useState("");
   const [resultDrafts, setResultDrafts] = useState({}); // fixtureId -> {h,a}
 
-  const addRow = () => setNewFixtures((f) => [...f, { home: "", away: "" }]);
+  const addRow = () => setNewFixtures((f) => [...f, { home: "", away: "", lockAt: "" }]);
   const removeRow = (i) => setNewFixtures((f) => f.filter((_, idx) => idx !== i));
   const updateRow = (i, field, val) => setNewFixtures((f) => f.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
 
@@ -128,14 +131,17 @@ export default function Home() {
       body: JSON.stringify({
         pin: pinInput,
         number: Number(newGwNumber),
-        lockAt: newLockAt ? new Date(newLockAt).toISOString() : null,
-        fixtures: newFixtures,
+        fixtures: newFixtures.map((f) => ({
+          home: f.home,
+          away: f.away,
+          lockAt: f.lockAt ? new Date(f.lockAt).toISOString() : null,
+        })),
       }),
     });
     const data = await res.json();
     setSaving(false);
     if (!res.ok) { showToast(data.error || "Failed"); return; }
-    setNewGwNumber(""); setNewLockAt(""); setNewFixtures([{ home: "", away: "" }]);
+    setNewGwNumber(""); setNewFixtures([{ home: "", away: "", lockAt: "" }]);
     await loadAll();
     showToast("Gameweek posted \u26bd");
   };
@@ -289,20 +295,25 @@ export default function Home() {
           <>
             {openGws.length === 0 && <div className="empty">No gameweek posted yet.<br />Check back once fixtures drop.</div>}
             {openGws.map((gw) => {
-              const locked = gw.lock_at && new Date() >= new Date(gw.lock_at);
+              const anyUnlocked = gw.fixtures.some((fx) => !isFxLocked(fx));
               return (
                 <div key={gw.id} style={{ marginBottom: "2rem" }}>
                   <div className="gw-head">
                     <div className="gw-title">Gameweek {gw.number}</div>
-                    <div className={`pill ${locked ? "locked" : "open"}`}>{locked ? "Locked" : fmtDeadline(gw.lock_at)}</div>
                   </div>
                   {gw.fixtures.map((fx) => {
+                    const locked = isFxLocked(fx);
                     const existing = predFor(fx.id);
                     const local = draft[fx.id] || {};
                     const h = local.h !== undefined ? local.h : (existing?.pred_home ?? "");
                     const a = local.a !== undefined ? local.a : (existing?.pred_away ?? "");
                     return (
                       <div key={fx.id} className="fixture-card">
+                        <div style={{ padding: "0.5rem 0.75rem 0", display: "flex", justifyContent: "flex-end" }}>
+                          <div className={`pill ${locked ? "locked" : "open"}`}>
+                            {locked ? "Locked" : fmtDeadline(fx.lock_at)}
+                          </div>
+                        </div>
                         <div className="fixture-row">
                           <div className="fixture-side">
                             <span className="team-name">{fx.home}</span>
@@ -319,7 +330,7 @@ export default function Home() {
                       </div>
                     );
                   })}
-                  {!locked && (
+                  {anyUnlocked && (
                     <button className="btn-primary" disabled={saving} onClick={() => submitGw(gw)}>
                       Lock In Predictions
                     </button>
@@ -346,10 +357,39 @@ export default function Home() {
                     <span className="lb-pts">{row.total} pts</span>
                   </button>
                   {expanded === row.name && (
-                    <div className="lb-detail">
-                      {finalizedGws.map((g) => (
-                        <div key={g.number} className="lb-chip">GW{g.number}: <b>{row.byGw[g.number] ?? 0}</b></div>
-                      ))}
+                    <div className="lb-detail" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                      {finalizedGws.map((g) => {
+                        const key = `${row.name}:${g.number}`;
+                        const isOpen = expandedGwDetail === key;
+                        return (
+                          <div key={g.number} style={{ width: "100%" }}>
+                            <button
+                              className="lb-chip"
+                              style={{ width: "100%", textAlign: "left", border: "none", cursor: "pointer" }}
+                              onClick={() => setExpandedGwDetail(isOpen ? null : key)}
+                            >
+                              GW{g.number}: <b>{row.byGw[g.number] ?? 0}</b> pts {isOpen ? "\u25b4" : "\u25be"}
+                            </button>
+                            {isOpen && (
+                              <div style={{ padding: "0.5rem 0.25rem 0.75rem" }}>
+                                {g.fixtures.map((fx) => {
+                                  const pred = predictions.find((pr) => pr.fixture_id === fx.id && pr.player_name === row.name);
+                                  const pts = pointsFor(pred?.pred_home, pred?.pred_away, fx.result_home, fx.result_away);
+                                  return (
+                                    <div key={fx.id} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.75rem", padding: "0.3rem 0", borderBottom: "1px solid #F0EEE4" }}>
+                                      <span>{fx.home} v {fx.away}</span>
+                                      <span style={{ color: "#9BB0A3" }}>
+                                        picked {pred ? `${pred.pred_home}-${pred.pred_away}` : "\u2014"}, actual {fx.result_home}-{fx.result_away}
+                                      </span>
+                                      <b>{pts} pt{pts === 1 ? "" : "s"}</b>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -377,13 +417,18 @@ export default function Home() {
             <div className="card">
               <div className="fx-row">
                 <input className="field" type="number" placeholder="GW number" value={newGwNumber} onChange={(e) => setNewGwNumber(e.target.value)} />
-                <input className="field" type="datetime-local" value={newLockAt} onChange={(e) => setNewLockAt(e.target.value)} />
               </div>
               {newFixtures.map((f, i) => (
-                <div key={i} className="fx-row">
-                  <input className="field" placeholder="Home team" value={f.home} onChange={(e) => updateRow(i, "home", e.target.value)} />
-                  <input className="field" placeholder="Away team" value={f.away} onChange={(e) => updateRow(i, "away", e.target.value)} />
-                  {newFixtures.length > 1 && <button className="remove-btn" onClick={() => removeRow(i)}>\u2715</button>}
+                <div key={i} style={{ marginBottom: "0.6rem", paddingBottom: "0.6rem", borderBottom: "1px solid #F0EEE4" }}>
+                  <div className="fx-row">
+                    <input className="field" placeholder="Home team" value={f.home} onChange={(e) => updateRow(i, "home", e.target.value)} />
+                    <input className="field" placeholder="Away team" value={f.away} onChange={(e) => updateRow(i, "away", e.target.value)} />
+                    {newFixtures.length > 1 && <button className="remove-btn" onClick={() => removeRow(i)}>\u2715</button>}
+                  </div>
+                  <input className="field" type="datetime-local" value={f.lockAt}
+                    onChange={(e) => updateRow(i, "lockAt", e.target.value)}
+                    style={{ marginBottom: 0 }} />
+                  <div style={{ fontSize: "0.7rem", color: "#9BB0A3", marginTop: "0.2rem" }}>Kickoff time \u2014 predictions for this match lock then</div>
                 </div>
               ))}
               <button className="small-btn" onClick={addRow}>+ Add fixture</button>
