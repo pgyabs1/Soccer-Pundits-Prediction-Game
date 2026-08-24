@@ -122,6 +122,35 @@ export default function Home() {
   const removeRow = (i) => setNewFixtures((f) => f.filter((_, idx) => idx !== i));
   const updateRow = (i, field, val) => setNewFixtures((f) => f.map((r, idx) => (idx === i ? { ...r, [field]: val } : r)));
 
+  const [fetchingFpl, setFetchingFpl] = useState(false);
+
+  const isoToLocalInput = (iso) => {
+    const d = new Date(iso);
+    const pad = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const fetchFromFpl = async () => {
+    setFetchingFpl(true);
+    const res = await fetch("/api/admin/fetch-fpl-fixtures", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin: pinInput }),
+    });
+    const data = await res.json();
+    setFetchingFpl(false);
+    if (!res.ok) { showToast(data.error || "Couldn't fetch fixtures"); return; }
+    setNewGwNumber(String(data.gwNumber));
+    setNewFixtures(
+      data.fixtures.map((f) => ({
+        home: f.home,
+        away: f.away,
+        lockAt: f.lockAt ? isoToLocalInput(f.lockAt) : "",
+      }))
+    );
+    showToast(`Pulled GW${data.gwNumber} from FPL \u26bd \u2014 review before posting`);
+  };
+
   const publishGw = async () => {
     if (!newGwNumber) { showToast("Enter a gameweek number"); return; }
     setSaving(true);
@@ -414,6 +443,9 @@ export default function Home() {
         {tab === "admin" && adminUnlocked && (
           <>
             <div className="section-title">Post a Gameweek</div>
+            <button className="btn-outline" style={{ width: "100%", marginBottom: "0.75rem" }} disabled={fetchingFpl} onClick={fetchFromFpl}>
+              {fetchingFpl ? "Fetching\u2026" : "\u26bd Pull fixtures from FPL"}
+            </button>
             <div className="card">
               <div className="fx-row">
                 <input className="field" type="number" placeholder="GW number" value={newGwNumber} onChange={(e) => setNewGwNumber(e.target.value)} />
