@@ -45,11 +45,15 @@ export default function Home() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
+    // .limit() below overrides Supabase/PostgREST's default 1000-row cap on
+    // plain selects -- without it, predictions (and fixtures/gameweeks, as the
+    // season grows) silently truncate and some players' rows just never arrive
+    // client-side, even though they're sitting fine in the database.
     const [playersRes, { data: gws }, { data: fx }, { data: preds }] = await Promise.all([
       fetch("/api/players").then((r) => r.json()),
-      supabase.from("gameweeks").select("*").order("number", { ascending: false }),
-      supabase.from("fixtures").select("*"),
-      supabase.from("predictions").select("*"),
+      supabase.from("gameweeks").select("*").order("number", { ascending: false }).limit(5000),
+      supabase.from("fixtures").select("*").limit(5000),
+      supabase.from("predictions").select("*").limit(20000),
     ]);
     setPlayers(playersRes.players || []);
     setPredictions(preds || []);
@@ -81,6 +85,9 @@ export default function Home() {
     if (!res.ok) { setJoinError(data.error || "Couldn't join"); return; }
     if (data.created) setPlayers((prev) => [...prev, data.name]);
     setMe(data.name);
+    if (data.claimed) {
+      showToast("PIN set for your account — use it from now on");
+    }
   };
 
   const predFor = (fixtureId) => predictions.find((pr) => pr.fixture_id === fixtureId && pr.player_name === me);
@@ -105,11 +112,25 @@ export default function Home() {
       })
       .filter(Boolean);
 
+    const failed = [];
     for (const row of rows) {
-      await supabase.from("predictions").upsert(row, { onConflict: "fixture_id,player_name" });
+      const { error } = await supabase
+        .from("predictions")
+        .upsert(row, { onConflict: "fixture_id,player_name" });
+      if (error) failed.push({ row, error });
     }
     await loadAll();
     setSaving(false);
+
+    if (failed.length > 0) {
+      console.error("Prediction save failures:", failed);
+      showToast(`\u26a0\ufe0f ${failed.length} prediction(s) failed to save \u2014 try again`);
+      return;
+    }
+    if (rows.length === 0) {
+      showToast("Nothing to save \u2014 all fixtures already locked");
+      return;
+    }
     showToast("Predictions locked in \u2705");
   };
 
