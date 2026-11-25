@@ -45,16 +45,33 @@ export default function Home() {
 
   const loadAll = useCallback(async () => {
     setLoading(true);
-    // .limit() below overrides Supabase/PostgREST's default 1000-row cap on
-    // plain selects -- without it, predictions (and fixtures/gameweeks, as the
-    // season grows) silently truncate and some players' rows just never arrive
-    // client-side, even though they're sitting fine in the database.
-    const [playersRes, { data: gws }, { data: fx }, { data: preds }] = await Promise.all([
+    // Supabase caps every request at its server-side "Max Rows" (1000 by
+    // default), and .limit() cannot override that. So we fetch in pages of
+    // 1000 with .range() until a page comes back short. Ordering by id keeps
+    // pages stable.
+    const fetchAll = async (table, orderCol = "id") => {
+      const pageSize = 1000;
+      let all = [];
+      for (let from = 0; ; from += pageSize) {
+        const { data, error } = await supabase
+          .from(table)
+          .select("*")
+          .order(orderCol, { ascending: true })
+          .range(from, from + pageSize - 1);
+        if (error) { console.error(`Load ${table} failed`, error); break; }
+        all = all.concat(data || []);
+        if (!data || data.length < pageSize) break;
+      }
+      return all;
+    };
+
+    const [playersRes, gwsRaw, fx, preds] = await Promise.all([
       fetch("/api/players").then((r) => r.json()),
-      supabase.from("gameweeks").select("*").order("number", { ascending: false }).limit(5000),
-      supabase.from("fixtures").select("*").limit(5000),
-      supabase.from("predictions").select("*").limit(20000),
+      fetchAll("gameweeks"),
+      fetchAll("fixtures"),
+      fetchAll("predictions"),
     ]);
+    const gws = [...gwsRaw].sort((a, b) => b.number - a.number);
     setPlayers(playersRes.players || []);
     setPredictions(preds || []);
     const withFixtures = (gws || []).map((g) => ({
